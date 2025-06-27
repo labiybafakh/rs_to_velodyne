@@ -83,11 +83,11 @@ bool has_nan(T point) {
 }
 
 template<typename T>
-void publish_points(T &new_pc, const sensor_msgs::msg::PointCloud2 &old_msg) {
+void publish_points(T &new_pc, const sensor_msgs::msg::PointCloud2::SharedPtr old_msg) {
     new_pc->is_dense = true;
     sensor_msgs::msg::PointCloud2 pc_new_msg;
     pcl::toROSMsg(*new_pc, pc_new_msg);
-    pc_new_msg.header = old_msg.header;
+    pc_new_msg.header = old_msg->header;
     pc_new_msg.header.frame_id = "velodyne";
     publisher_velodyne_points->publish(pc_new_msg);
 }
@@ -114,7 +114,7 @@ void rsHandler_XYZI(const sensor_msgs::msg::PointCloud2::SharedPtr pc_msg) {
         pc_new->points.push_back(new_point);
     }
 
-    publish_points(pc_new, *pc_msg);
+    publish_points(pc_new, pc_msg);
 }
 
 
@@ -171,19 +171,53 @@ void rsHandler_XYZIRT(const sensor_msgs::msg::PointCloud2::SharedPtr pc_msg) {
 
     if (output_type == "XYZIRT") {
         pcl::PointCloud<VelodynePointXYZIRT>::Ptr pc_out(new pcl::PointCloud<VelodynePointXYZIRT>());
-        handle_pc_msg<RsPointXYZIRT, VelodynePointXYZIRT>(pc_in, pc_out);
-        add_ring<RsPointXYZIRT, VelodynePointXYZIRT>(pc_in, pc_out);
-        add_time<RsPointXYZIRT, VelodynePointXYZIRT>(pc_in, pc_out);
-        publish_points(pc_out, *pc_msg);
+        double base_time = pc_in->points.empty() ? 0.0 : pc_in->points[0].timestamp;
+        for (const auto& pt : pc_in->points) {
+            if (has_nan(pt)) continue;
+            VelodynePointXYZIRT vpt;
+            vpt.x = pt.x;
+            vpt.y = pt.y;
+            vpt.z = pt.z;
+            vpt.intensity = pt.intensity;
+            vpt.ring = pt.ring;
+            vpt.time = static_cast<float>(pt.timestamp - base_time);
+            pc_out->points.push_back(vpt);
+        }
+        pc_out->width = pc_out->points.size();
+        pc_out->height = 1;
+        pc_out->is_dense = true;
+        publish_points(pc_out, pc_msg);
     } else if (output_type == "XYZIR") {
         pcl::PointCloud<VelodynePointXYZIR>::Ptr pc_out(new pcl::PointCloud<VelodynePointXYZIR>());
-        handle_pc_msg<RsPointXYZIRT, VelodynePointXYZIR>(pc_in, pc_out);
-        add_ring<RsPointXYZIRT, VelodynePointXYZIR>(pc_in, pc_out);
-        publish_points(pc_out, *pc_msg);
+        for (const auto& pt : pc_in->points) {
+            if (has_nan(pt)) continue;
+            VelodynePointXYZIR vpt;
+            vpt.x = pt.x;
+            vpt.y = pt.y;
+            vpt.z = pt.z;
+            vpt.intensity = pt.intensity;
+            vpt.ring = pt.ring;
+            pc_out->points.push_back(vpt);
+        }
+        pc_out->width = pc_out->points.size();
+        pc_out->height = 1;
+        pc_out->is_dense = true;
+        publish_points(pc_out, pc_msg);
     } else if (output_type == "XYZI") {
         pcl::PointCloud<pcl::PointXYZI>::Ptr pc_out(new pcl::PointCloud<pcl::PointXYZI>());
-        handle_pc_msg<RsPointXYZIRT, pcl::PointXYZI>(pc_in, pc_out);
-        publish_points(pc_out, *pc_msg);
+        for (const auto& pt : pc_in->points) {
+            if (has_nan(pt)) continue;
+            pcl::PointXYZI vpt;
+            vpt.x = pt.x;
+            vpt.y = pt.y;
+            vpt.z = pt.z;
+            vpt.intensity = pt.intensity;
+            pc_out->points.push_back(vpt);
+        }
+        pc_out->width = pc_out->points.size();
+        pc_out->height = 1;
+        pc_out->is_dense = true;
+        publish_points(pc_out, pc_msg);
     }
 }
 
@@ -199,12 +233,12 @@ int main(int argc, char **argv) {
         output_type = argv[2];
 
         if (std::strcmp("XYZI", argv[1]) == 0) {
-            auto subscriber_robosense_points = node->create_subscription<sensor_msgs::msg::PointCloud2>(
+            subscriber_robosense_points = node->create_subscription<sensor_msgs::msg::PointCloud2>(
                 "/rslidar_points", 1,
                 rsHandler_XYZI
             );
         } else if (std::strcmp("XYZIRT", argv[1]) == 0) {
-            auto subscriber_robosense_points = node->create_subscription<sensor_msgs::msg::PointCloud2>(
+            subscriber_robosense_points = node->create_subscription<sensor_msgs::msg::PointCloud2>(
                 "/rslidar_points", 1,
                 rsHandler_XYZIRT
             );
